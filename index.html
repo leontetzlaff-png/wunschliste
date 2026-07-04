@@ -80,10 +80,10 @@
   }
   ul { list-style: none; margin: 0 0 24px 0; padding: 0; }
   li {
-    display: flex; align-items: center; gap: 10px;
     background: #fff; border: 1px solid #E2DDD3; border-radius: 12px;
     padding: 12px; margin-bottom: 8px;
   }
+  .item-top { display: flex; align-items: center; gap: 10px; }
   .check {
     flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
     border: 2px solid #D8D2C5; background: none; display: flex;
@@ -93,12 +93,50 @@
   .item-name { flex: 1; font-size: 15px; min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .item-name.bought, .item-price.bought { color: #B5AD9C; text-decoration: line-through; }
-  .item-price { font-family: "Courier New", monospace; font-size: 15px; white-space: nowrap; }
   .del-btn {
     flex-shrink: 0; width: 28px; height: 28px; border: none; background: none;
     color: #D8D2C5; display: flex; align-items: center; justify-content: center;
     cursor: pointer;
   }
+  .item-meta {
+    display: flex; align-items: center; gap: 10px; margin: 6px 0 0 34px;
+    font-family: "Courier New", monospace; font-size: 12px; color: #B5AD9C;
+  }
+  .item-link {
+    color: #C1542D; text-decoration: none; display: flex; align-items: center; gap: 3px;
+  }
+  .item-price-row {
+    display: flex; align-items: center; gap: 8px; margin: 8px 0 0 34px; flex-wrap: wrap;
+  }
+  .item-price { font-family: "Courier New", monospace; font-size: 15px; white-space: nowrap; }
+  .price-change {
+    font-family: "Courier New", monospace; font-size: 12px; font-weight: 700;
+    padding: 2px 6px; border-radius: 6px;
+  }
+  .price-change.up { color: #B0413E; background: #FBEAE9; }
+  .price-change.down { color: #4C7952; background: #EAF2EA; }
+  .update-price-btn {
+    margin-left: auto; border: none; background: #F1EDE4; color: #8A8270;
+    font-size: 12px; font-family: "Courier New", monospace; padding: 5px 8px;
+    border-radius: 6px; cursor: pointer;
+  }
+  .lowest-price {
+    margin: 4px 0 0 34px; font-family: "Courier New", monospace; font-size: 11px; color: #8A8270;
+  }
+  .edit-row {
+    display: flex; gap: 6px; margin: 8px 0 0 34px; align-items: center;
+  }
+  .edit-row input {
+    flex: 1; border: 1px solid #D8D2C5; border-radius: 6px; padding: 6px 8px;
+    font-size: 15px; outline: none;
+  }
+  .edit-row input:focus { border-color: #C1542D; }
+  .edit-save, .edit-cancel {
+    border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px;
+    font-family: "Courier New", monospace; cursor: pointer;
+  }
+  .edit-save { background: #2B2B2B; color: #fff; }
+  .edit-cancel { background: #F1EDE4; color: #8A8270; }
   .total-box { border-top: 2px dashed #D8D2C5; padding-top: 16px; font-family: "Courier New", monospace; }
   .total-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
   .total-label { color: #8A8270; font-size: 13px; }
@@ -126,6 +164,7 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
       </button>
     </div>
+    <input id="linkInput" class="field" style="margin-bottom:0;" type="url" placeholder="Link zum Produkt (optional)" />
   </div>
 
   <div id="listArea"></div>
@@ -136,9 +175,22 @@
 <script>
   const STORAGE_KEY = 'wunschliste-items';
   let items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+  let editingId = null;
+
+  // Migration: alte Einträge ohne neue Felder ergänzen
+  items = items.map(it => ({
+    dateAdded: it.dateAdded || new Date().toISOString(),
+    link: it.link || '',
+    lowestPrice: it.lowestPrice != null ? it.lowestPrice : it.price,
+    lowestPriceDate: it.lowestPriceDate || it.dateAdded || new Date().toISOString(),
+    previousPrice: it.previousPrice != null ? it.previousPrice : null,
+    priceChangeDate: it.priceChangeDate || null,
+    ...it,
+  }));
 
   const nameInput = document.getElementById('nameInput');
   const priceInput = document.getElementById('priceInput');
+  const linkInput = document.getElementById('linkInput');
   const priceWrap = document.getElementById('priceWrap');
   const addBtn = document.getElementById('addBtn');
   const listArea = document.getElementById('listArea');
@@ -148,8 +200,22 @@
     return n.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
+  function fmtDate(iso) {
+    return new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
   function save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function escapeAttr(str) {
+    return str.replace(/"/g, '&quot;');
   }
 
   function render() {
@@ -161,18 +227,60 @@
       return;
     }
 
-    listArea.innerHTML = '<ul>' + items.map(it => `
+    listArea.innerHTML = '<ul>' + items.map(it => {
+      const hasChange = it.previousPrice != null && it.previousPrice !== it.price;
+      const diff = hasChange ? it.price - it.previousPrice : 0;
+      let changeHtml = '';
+      if (hasChange) {
+        const cls = diff > 0 ? 'up' : 'down';
+        const arrow = diff > 0 ? '▲' : '▼';
+        changeHtml = `<span class="price-change ${cls}">${arrow} ${fmt(Math.abs(diff))} €</span>`;
+      }
+
+      let lowestHtml = '';
+      if (it.lowestPrice < it.price) {
+        lowestHtml = `<div class="lowest-price">Tiefstpreis: ${fmt(it.lowestPrice)} € (${fmtDate(it.lowestPriceDate)})</div>`;
+      } else if (it.lowestPrice === it.price && hasChange && diff < 0) {
+        lowestHtml = `<div class="lowest-price">🏆 neuer Tiefstpreis (${fmtDate(it.lowestPriceDate)})</div>`;
+      }
+
+      const linkHtml = it.link
+        ? `<a class="item-link" href="${escapeAttr(it.link)}" target="_blank" rel="noopener">🔗 Link</a>`
+        : '';
+
+      const editHtml = editingId === it.id ? `
+        <div class="edit-row">
+          <input id="editPriceInput" type="text" inputmode="decimal" value="${fmt(it.price)}" />
+          <button class="edit-save" data-id="${it.id}" data-action="saveEdit">Speichern</button>
+          <button class="edit-cancel" data-action="cancelEdit">Abbrechen</button>
+        </div>
+      ` : '';
+
+      return `
       <li>
-        <button class="check ${it.bought ? 'bought' : ''}" data-id="${it.id}" data-action="toggle">
-          ${it.bought ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
-        </button>
-        <span class="item-name ${it.bought ? 'bought' : ''}">${escapeHtml(it.name)}</span>
-        <span class="item-price ${it.bought ? 'bought' : ''}">${fmt(it.price)} €</span>
-        <button class="del-btn" data-id="${it.id}" data-action="delete">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        </button>
+        <div class="item-top">
+          <button class="check ${it.bought ? 'bought' : ''}" data-id="${it.id}" data-action="toggle">
+            ${it.bought ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : ''}
+          </button>
+          <span class="item-name ${it.bought ? 'bought' : ''}">${escapeHtml(it.name)}</span>
+          <button class="del-btn" data-id="${it.id}" data-action="delete">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+        <div class="item-meta">
+          <span>${fmtDate(it.dateAdded)}</span>
+          ${linkHtml}
+        </div>
+        <div class="item-price-row">
+          <span class="item-price ${it.bought ? 'bought' : ''}">${fmt(it.price)} €</span>
+          ${changeHtml}
+          ${!it.bought ? `<button class="update-price-btn" data-id="${it.id}" data-action="startEdit">Preis aktualisieren</button>` : ''}
+        </div>
+        ${lowestHtml}
+        ${editHtml}
       </li>
-    `).join('') + '</ul>';
+    `;
+    }).join('') + '</ul>';
 
     const openTotal = items.filter(i => !i.bought).reduce((s, i) => s + i.price, 0);
     const boughtTotal = items.filter(i => i.bought).reduce((s, i) => s + i.price, 0);
@@ -205,33 +313,85 @@
         save(); render();
       });
     });
-  }
-
-  function escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
+    listArea.querySelectorAll('[data-action="startEdit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingId = btn.dataset.id;
+        render();
+        const input = document.getElementById('editPriceInput');
+        if (input) { input.focus(); input.select(); }
+      });
+    });
+    listArea.querySelectorAll('[data-action="cancelEdit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingId = null;
+        render();
+      });
+    });
+    listArea.querySelectorAll('[data-action="saveEdit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const input = document.getElementById('editPriceInput');
+        const newPrice = parseFloat((input.value || '').replace(',', '.'));
+        if (isNaN(newPrice)) { editingId = null; render(); return; }
+        items = items.map(i => {
+          if (i.id !== id) return i;
+          if (newPrice === i.price) return i;
+          const updated = {
+            ...i,
+            previousPrice: i.price,
+            priceChangeDate: new Date().toISOString(),
+            price: newPrice,
+          };
+          if (newPrice < updated.lowestPrice) {
+            updated.lowestPrice = newPrice;
+            updated.lowestPriceDate = updated.priceChangeDate;
+          }
+          return updated;
+        });
+        editingId = null;
+        save(); render();
+      });
+    });
+    const editInput = document.getElementById('editPriceInput');
+    if (editInput) {
+      editInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          document.querySelector('[data-action="saveEdit"]').click();
+        } else if (e.key === 'Escape') {
+          editingId = null; render();
+        }
+      });
+    }
   }
 
   function addItem() {
     const name = nameInput.value.trim();
     if (!name) return;
     const parsed = parseFloat(priceInput.value.replace(',', '.'));
+    const price = isNaN(parsed) ? 0 : parsed;
     items.unshift({
       id: Date.now().toString(),
       name,
-      price: isNaN(parsed) ? 0 : parsed,
+      price,
+      link: linkInput.value.trim(),
+      dateAdded: new Date().toISOString(),
+      lowestPrice: price,
+      lowestPriceDate: new Date().toISOString(),
+      previousPrice: null,
+      priceChangeDate: null,
       bought: false,
     });
     nameInput.value = '';
     priceInput.value = '';
+    linkInput.value = '';
     save(); render();
     nameInput.focus();
   }
 
   nameInput.addEventListener('input', render);
-  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
-  priceInput.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
+  nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') priceInput.focus(); });
+  priceInput.addEventListener('keydown', e => { if (e.key === 'Enter') linkInput.focus(); });
+  linkInput.addEventListener('keydown', e => { if (e.key === 'Enter') addItem(); });
   priceInput.addEventListener('focus', () => priceWrap.classList.add('focus'));
   priceInput.addEventListener('blur', () => priceWrap.classList.remove('focus'));
   addBtn.addEventListener('click', addItem);
