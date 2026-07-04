@@ -105,6 +105,11 @@
   .item-link {
     color: #C1542D; text-decoration: none; display: flex; align-items: center; gap: 3px;
   }
+  .link-edit-btn {
+    border: none; background: none; color: #B5AD9C; font-size: 12px;
+    font-family: "Courier New", monospace; cursor: pointer; padding: 0;
+    text-decoration: underline;
+  }
   .item-price-row {
     display: flex; align-items: center; gap: 8px; margin: 8px 0 0 34px; flex-wrap: wrap;
   }
@@ -176,6 +181,7 @@
   const STORAGE_KEY = 'wunschliste-items';
   let items = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
   let editingId = null;
+  let editingLinkId = null;
 
   // Migration: alte Einträge ohne neue Felder ergänzen
   items = items.map(it => ({
@@ -245,8 +251,17 @@
       }
 
       const linkHtml = it.link
-        ? `<a class="item-link" href="${escapeAttr(it.link)}" target="_blank" rel="noopener">🔗 Link</a>`
-        : '';
+        ? `<a class="item-link" href="${escapeAttr(it.link)}" target="_blank" rel="noopener">🔗 Link</a>
+           <button class="link-edit-btn" data-id="${it.id}" data-action="startEditLink">ändern</button>`
+        : `<button class="link-edit-btn" data-id="${it.id}" data-action="startEditLink">+ Link hinzufügen</button>`;
+
+      const linkEditHtml = editingLinkId === it.id ? `
+        <div class="edit-row">
+          <input id="editLinkInput" type="url" placeholder="Link zum Produkt" value="${escapeAttr(it.link || '')}" />
+          <button class="edit-save" data-id="${it.id}" data-action="saveLinkEdit">Speichern</button>
+          <button class="edit-cancel" data-action="cancelLinkEdit">Abbrechen</button>
+        </div>
+      ` : '';
 
       const editHtml = editingId === it.id ? `
         <div class="edit-row">
@@ -271,6 +286,7 @@
           <span>${fmtDate(it.dateAdded)}</span>
           ${linkHtml}
         </div>
+        ${linkEditHtml}
         <div class="item-price-row">
           <span class="item-price ${it.bought ? 'bought' : ''}">${fmt(it.price)} €</span>
           ${changeHtml}
@@ -352,6 +368,40 @@
         save(); render();
       });
     });
+    listArea.querySelectorAll('[data-action="startEditLink"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingLinkId = btn.dataset.id;
+        render();
+        const input = document.getElementById('editLinkInput');
+        if (input) { input.focus(); input.select(); }
+      });
+    });
+    listArea.querySelectorAll('[data-action="cancelLinkEdit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        editingLinkId = null;
+        render();
+      });
+    });
+    listArea.querySelectorAll('[data-action="saveLinkEdit"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        const input = document.getElementById('editLinkInput');
+        const newLink = (input.value || '').trim();
+        items = items.map(i => i.id === id ? { ...i, link: newLink } : i);
+        editingLinkId = null;
+        save(); render();
+      });
+    });
+    const editLinkInput = document.getElementById('editLinkInput');
+    if (editLinkInput) {
+      editLinkInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+          document.querySelector('[data-action="saveLinkEdit"]').click();
+        } else if (e.key === 'Escape') {
+          editingLinkId = null; render();
+        }
+      });
+    }
     const editInput = document.getElementById('editPriceInput');
     if (editInput) {
       editInput.addEventListener('keydown', e => {
